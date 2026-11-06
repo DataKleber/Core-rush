@@ -15,6 +15,8 @@ import { FX } from './fx.js';
 import { Nav } from './nav.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { CHARACTERS, prepareCharacters, getCharacter, applyLook } from './characters.js';
+import { Energia } from './energia.js'; // v1.2
+import { Rede } from './rede.js'; // v1.3: salas online
 
 const $ = id => document.getElementById(id);
 const SPAWNS = [[-9.5, 9.5], [9.5, 9.5], [9.5, -9.5], [-9.5, -9.5]];
@@ -49,6 +51,9 @@ class Game {
     this.buildBoard();
     this.buildSelect();
     this.bindUI();
+    this.energia = new Energia(this); // v1.2: arena de energia, impacto e eventos
+    this.online = false; this.remote = false; this.emit = null;
+    this.net = new Rede(this); // v1.3: jogar com amigos por link
 
     this.time = 0; this.hitstop = 0; this.shake = 0;
     this.resetMatch();
@@ -114,6 +119,7 @@ class Game {
       f.lastWhole = 0;
     });
     this.core.reset();
+    if (this.energia) this.energia.reset();
     this.matchTime = CFG.matchTime;
     this.lastSecond = Math.ceil(this.matchTime);
   }
@@ -128,7 +134,7 @@ class Game {
 
   // ---------- Seleção de personagens (simples) ----------
   buildSelect() {
-    const thumbs = this.makeThumbs();
+    const thumbs = this.thumbs = this.makeThumbs();
     $('charGrid').innerHTML = CHARACTERS.map(c => `
       <button class="pick" data-id="${c.id}" aria-pressed="false">
         <img src="${thumbs[c.id]}" alt="" width="120" height="144"><span>${c.name}</span>
@@ -174,7 +180,7 @@ class Game {
 
   startMatch() {
     this.audio.unlock();
-    this.assignCharacters();
+    if (!this.online) this.assignCharacters();
     this.audio.stopLong(); this.audio.setTrack('game');
     this.finalBuildOn = false;
     this.resetMatch();
@@ -200,16 +206,45 @@ class Game {
         <span class="pts">${Math.floor(f.score)} pts</span>
       </li>`).join('');
     this.audio.end(win);
+    if (this.net) this.net.fim(); // v1.3: anfitrião avisa os convidados
     setTimeout(() => { if (this.state === 'end') { $('hud').hidden = true; $('results').hidden = false; } }, 1300);
     this.showBanner('FIM DE PARTIDA', '#ffffff', 1.3);
   }
 
+  again() { // v1.3: online, só o anfitrião recomeça
+    if (!this.online) this.startMatch();
+    else if (this.net.host) this.net.comecar();
+  }
+
+  // v1.3: aplica a sala online (nomes, personagens, quem é "você" neste aparelho)
+  aplicarSala(slots, eu) {
+    this.fighters.forEach((f, i) => {
+      const sl = slots[i];
+      f.setCharacter(sl.char); f.setName(sl.nome || ROSTER[i].name);
+      f.isPlayer = i === eu;
+      f.netIn = this.net.host && sl.humano && i !== eu ? (f.netIn || { x: 0, z: 0, atkT: 0, k: 0 }) : null;
+    });
+    this.player = this.fighters[eu];
+    this.buildBoard();
+    $('pauseBtn').hidden = true; // partida online não pausa
+  }
+  sairDaSala() {
+    this.online = false; this.remote = false; this.emit = null;
+    this.fighters.forEach((f, i) => { f.isPlayer = i === 0; f.netIn = null; f.setName(ROSTER[i].name); });
+    this.player = this.fighters[0];
+    this.assignCharacters(); this.buildBoard();
+    $('pauseBtn').hidden = false;
+    $('againBtn').disabled = false; $('againBtn').textContent = 'JOGAR DE NOVO';
+  }
+
   togglePause() {
+    if (this.online) return; // v1.3: partida online não pausa
     if (this.state === 'play' || this.state === 'countdown') { this.prevState = this.state; this.state = 'paused'; $('pause').hidden = false; this.audio.stopLong(); }
     else if (this.state === 'paused') { this.state = this.prevState; $('pause').hidden = true; }
   }
 
   toMenu() {
+    if (this.online) this.net.sair(); // v1.3
     this.audio.stopLong(); this.audio.setTrack('menu');
     this.resetMatch();
     this.state = 'menu';
@@ -234,11 +269,32 @@ class Game {
       const mine = att.isPlayer || o.isPlayer;
       if (o.shield > 0) {
         o.vel.addScaledVector(dir, 4);
-        this.fx.wave(o.pos, 0xbff6ff, 2.4, 0.3);
-        this.audio.blocked();
+        this.hitFx(o, att, dir, true, false);
         continue;
       }
       o.takeHit(att, dir, this);
+      const carry = o.carrying;
+      if (carry) {
+        this.core.drop(dir);
+        o.pickupCd = CFG.core.dropCooldown;
+      }
+      this.hitFx(o, att, dir, false, carry);
+    }
+  }
+
+  // v1.3: efeitos do acerto (o anfitrião reproduz e envia; o convidado só reproduz)
+  hitFx(o, att, dir, blocked, carry) {
+    if (this.emit) this.emit('h', [o.index, att.index, +dir.x.toFixed(3), +dir.z.toFixed(3), blocked ? 1 : 0, carry ? 1 : 0]);
+    const A = CFG.attack;
+    const mine = att.isPlayer || o.isPlayer;
+    if (blocked) {
+      this.fx.wave(o.pos, 0xbff6ff, 2.4, 0.3);
+      this.audio.blocked();
+      return;
+    }
+    if (this.remote) o.takeHit(att, dir, this); // só a reação visual; posição vem do anfitrião
+    {
+      this.energia.impact(o, att, dir, mine);
       const hp = _a.copy(o.pos).setY(1.1);
       // v0.5: impacto com direção — clarão no ponto de contato e faíscas saindo para trás do alvo
       this.fx.flash(hp, 0xffffff, 1.5, 0.08);
@@ -247,11 +303,9 @@ class Game {
       this.fx.spray(hp, dir.x, dir.z, att.color, 16, 9, 0.9, 0.45, 0.42);
       this.fx.wave(o.pos, att.color, 2.6, 0.35);
       // v0.7: congelamento e tremor só quando o jogador acerta ou é acertado
-      if (mine) { this.hitstop = A.hitstop; this.shake = Math.max(this.shake, 0.4); }
+      if (mine) { if (!this.online) this.hitstop = A.hitstop; this.shake = Math.max(this.shake, 0.4); }
       this.audio.hit(mine);
-      if (o.carrying) {
-        this.core.drop(dir);
-        o.pickupCd = CFG.core.dropCooldown;
+      if (carry) {
         this.audio.drop();
         this.fx.burst(_a.copy(o.pos).setY(2.4), 0xbff6ff, 24, 10, 0.7, 0.5, 4);
         this.lastDropper = o; // v1.0.1: quem perdeu o núcleo por último (para filtrar avisos entre bots)
@@ -276,13 +330,25 @@ class Game {
     // v0.3: pulso de luz na captura + arrancada curta (janela de fuga)
     const C = CFG.core;
     best.boostT = C.boostTime;
-    let pushedPlayer = false;
+    const pushed = [];
     for (const o of this.fighters) {
       if (o === best || o.invuln > 0) continue;
       const dx = o.pos.x - best.pos.x, dz = o.pos.z - best.pos.z, d = Math.hypot(dx, dz);
       if (d >= C.pulseRadius || d < 0.01) continue;
       o.stagger(dx / d, dz / d, C.pulsePush, C.pulseStagger);
-      if (o.isPlayer) pushedPlayer = true;
+      pushed.push(o.index);
+    }
+    this.pickupFx(best, pushed);
+  }
+
+  // v1.3: efeitos da captura (anfitrião e convidado)
+  pickupFx(best, pushed) {
+    if (this.emit) this.emit('p', [best.index, pushed]);
+    const C = CFG.core;
+    const pushedPlayer = pushed.includes(this.player.index);
+    if (this.remote) for (const i of pushed) {
+      const o = this.fighters[i], dx = o.pos.x - best.pos.x, dz = o.pos.z - best.pos.z, d = Math.hypot(dx, dz) || 1;
+      o.setStunPose(dx / d, dz / d, C.pulseStagger, 0.25);
     }
     this.fx.wave(best.pos, 0xbff6ff, C.pulseRadius, 0.35);
     if (best.isPlayer || pushedPlayer) this.shake = Math.max(this.shake, 0.18);
@@ -348,22 +414,28 @@ class Game {
     }
 
     const live = this.state === 'play' || this.state === 'menu';
-    if (live) this.simulate(dt);
+    if (this.remote) { if (this.state === 'play') this.net.aplicar(dt); } // v1.3: convidado desenha o estado do anfitrião
+    else if (live) this.simulate(dt);
     else for (const f of this.fighters) { f.moveInput.set(0, 0); }
 
     for (const f of this.fighters) f.animate(dt, this.time);
-    this.core.update(dt, this.time, this.arena.colliders, this.nav);
+    this.core.update(dt, this.time, this.arena.colliders, this.nav, this.remote);
     this.arena.update(this.time);
     this.fx.update(dt);
+    this.energia.update(dt, this.time);
     this.updateCamera(rawDt);
     if (this.state !== 'menu') this.updateHUD();
+    if (this.online) this.net.tick(rawDt); // v1.3
   }
 
   simulate(dt) {
     // Controle do jogador (no menu, ele também é um bot para a vitrine)
     for (let i = 0; i < this.fighters.length; i++) {
       const f = this.fighters[i];
-      if (f.isPlayer && this.state === 'play') {
+      if (f.netIn && this.state === 'play') { // v1.3: amigo online (comandos chegam pela rede)
+        f.moveInput.set(f.netIn.x, f.netIn.z);
+        if (f.netIn.atkT > 0) { if (f.tryAttack(this)) f.netIn.atkT = 0; else f.netIn.atkT -= dt; }
+      } else if (f.isPlayer && this.state === 'play') {
         this.input.move(_mv);
         f.moveInput.copy(_mv);
         if (this.input.wantsAttack() && f.tryAttack(this)) this.input.clearAttack();
@@ -386,14 +458,16 @@ class Game {
     this.checkPickup();
 
     if (this.state !== 'play') return;
+    this.energia.partida(dt); // v1.2: eventos (orbes, supercarga, reta final)
     // Pontuação e relógio
     const c = this.core.carrier;
     if (c) {
-      c.score += dt * CFG.pointsPerSec;
+      c.score += dt * CFG.pointsPerSec * this.energia.mult;
       const whole = Math.floor(c.score);
       if (whole !== c.lastWhole) {
         c.lastWhole = whole;
-        this.floatText('+1', c, hex(c.color));
+        const m2 = this.energia.mult > 1; // v1.2: em dobro mostra "+2" a cada 2 pontos (menos poluição)
+        if (!m2 || whole % 2 === 0) this.floatText(m2 ? '+2' : '+1', c, hex(c.color));
         if (c.isPlayer) this.audio.point();
       }
     }
@@ -438,8 +512,9 @@ class Game {
       const s = this.shake * this.shake * 1.2;
       _a.x += (Math.random() - 0.5) * s; _a.y += (Math.random() - 0.5) * s; _a.z += (Math.random() - 0.5) * s;
     }
+    const kk = this.energia ? this.energia.kick : _mv.set(0, 0); _a.x += kk.x; _a.z += kk.y; // v1.2: tranco de câmera no impacto
     cam.position.lerp(_a, this.state === 'countdown' ? 1 - Math.exp(-4 * dt) : 1);
-    cam.lookAt(this.camTarget.x, 0, this.camTarget.z - 0.6);
+    cam.lookAt(this.camTarget.x + kk.x * 0.6, 0, this.camTarget.z - 0.6 + kk.y * 0.6);
   }
 
   render() { this.composer.render(); }
@@ -515,7 +590,7 @@ class Game {
     $('playBtn').onclick = ck(() => this.openSelect());
     $('startBtn').onclick = ck(() => this.startMatch());
     $('backBtn').onclick = ck(() => { $('select').hidden = true; $('menu').hidden = false; });
-    $('againBtn').onclick = ck(() => this.startMatch());
+    $('againBtn').onclick = ck(() => this.again());
     $('menuBtn').onclick = ck(() => this.toMenu());
     $('resumeBtn').onclick = ck(() => this.togglePause());
     $('quitBtn').onclick = ck(() => this.toMenu());
@@ -528,7 +603,7 @@ class Game {
       if (e.code === 'Enter' || e.code === 'Space') {
         if (this.state === 'menu' && !$('select').hidden) { if (e.code === 'Enter') { e.preventDefault(); this.startMatch(); } }
         else if (this.state === 'menu') { e.preventDefault(); this.openSelect(); }
-        else if (this.state === 'end' && !$('results').hidden) { e.preventDefault(); this.startMatch(); }
+        else if (this.state === 'end' && !$('results').hidden) { e.preventDefault(); this.again(); }
       }
     });
   }
