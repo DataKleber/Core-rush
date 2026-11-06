@@ -8,7 +8,7 @@ import { CHARACTERS } from './characters.js';
 
 const $ = id => document.getElementById(id);
 const PREFIXO = 'corerush-v13-';
-const SNAP_HZ = 20, INPUT_HZ = 30, ATRASO = 0.1, LIMITE_SILENCIO = 6;
+const SNAP_HZ = 20, INPUT_HZ = 30, ATRASO = 0.1, LIMITE_SILENCIO = 12;
 const FASES = ['none', 'windup', 'active', 'recovery'];
 const hex = c => '#' + c.toString(16).padStart(6, '0');
 const limpaNome = n => String(n || '').toUpperCase().replace(/[^A-Z0-9À-Ý _-]/g, '').trim().slice(0, 10);
@@ -25,6 +25,28 @@ export class Rede {
     this.ui();
     const sala = new URLSearchParams(location.search).get('sala');
     if (sala) setTimeout(() => this.abrir(limpaNome(sala).replace(/[^A-Z0-9]/g, '')), 0);
+  }
+
+  // v1.3.1: com a aba escondida/minimizada o navegador para o desenho (requestAnimationFrame).
+  // Um relógio num Worker (não é freado como a página) mantém a partida rodando no anfitrião
+  // e mantém o sinal do convidado. O desenho volta sozinho quando a aba reaparece.
+  fundo() {
+    if (this.relogio) return;
+    try {
+      const url = URL.createObjectURL(new Blob(['setInterval(() => postMessage(0), 33);'], { type: 'text/javascript' }));
+      this.relogio = new Worker(url);
+    } catch (e) { return; }
+    let last = performance.now();
+    this.relogio.onmessage = () => {
+      const g = this.g, agora = performance.now(), dt = Math.min((agora - last) / 1000, 0.05);
+      last = agora;
+      if (!g.online || !document.hidden) return;
+      if (this.host) g.step(dt); // a partida continua para todos
+      else if (this.hostConn && this.hostConn.open && agora - (this.ping || 0) > 1000) {
+        this.ping = agora;
+        try { this.hostConn.send({ t: 'i', x: 0, z: 0, k: this.k || 0 }); } catch (e) {} // parado, mas presente
+      }
+    };
   }
 
   // ---------- tela da sala ----------
@@ -87,6 +109,7 @@ export class Rede {
     const cod = Array.from({ length: 5 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.random() * 31 | 0]).join('');
     const peer = this.peer = new window.Peer(PREFIXO + cod, this.opcoesPeer());
     peer.on('open', () => {
+      this.fundo();
       this.host = true; this.codigo = cod; this.g.online = true;
       const u = new URL(location.href); u.search = '?sala=' + cod;
       const sinal = new URLSearchParams(location.search).get('sinal'); if (sinal) u.searchParams.set('sinal', sinal);
@@ -117,6 +140,7 @@ export class Rede {
       v.nome = limpaNome(d.nome) || 'AMIGO';
       v.char = CHARACTERS.some(c => c.id === d.char) ? d.char : CHARACTERS[0].id;
       this.listar();
+    } else if (d.t === 'ok') { if (d.m === this.partidaId) v.confirmou = true;
     } else if (d.t === 'i' && v.f && v.f.netIn) {
       const n = v.f.netIn;
       n.x = Math.max(-1, Math.min(1, +d.x || 0)); n.z = Math.max(-1, Math.min(1, +d.z || 0));
@@ -155,7 +179,8 @@ export class Rede {
       const v = this.vagas[i];
       slots.push(v ? { nome: v.nome, char: v.char, humano: true } : { nome: ROSTER[i].name, char: livres.shift() || CHARACTERS[i % CHARACTERS.length].id, humano: false });
     }
-    this.vagas.forEach((v, i) => { if (v.conn) { v.conn.send({ t: 'start', slots, eu: i }); } });
+    this.partidaId = (this.partidaId || 0) + 1;
+    this.vagas.forEach((v, i) => { if (v.conn) { v.inicio = { t: 'start', slots, eu: i, m: this.partidaId }; v.confirmou = false; try { v.conn.send(v.inicio); } catch (e) {} } });
     g.aplicarSala(slots, 0);
     this.vagas.forEach((v, i) => { v.f = g.fighters[i]; });
     g.emit = (t, d) => { if (g.state === 'play') this.ev.push([t, d]); };
@@ -170,7 +195,10 @@ export class Rede {
     if (this.host) {
       const agora = performance.now();
       for (const v of [...this.vagas]) if (v.conn && agora - v.visto > LIMITE_SILENCIO * 1000) { try { v.conn.close(); } catch (e) {} this.saiu(v); }
-      if (g.state !== 'play') { if (agora - (this.ping || 0) > 1000) { this.ping = agora; this.enviarTodos({ t: 'oi' }); } return; }
+      if (g.state === 'countdown' || g.state === 'play') for (const v of this.vagas) {
+        if (v.conn && v.inicio && !v.confirmou && agora - (v.reenvio || 0) > 500) { v.reenvio = agora; try { v.conn.send(v.inicio); } catch (e) {} }
+      }
+      if (g.state !== 'play' && g.state !== 'countdown') { if (agora - (this.ping || 0) > 1000) { this.ping = agora; this.enviarTodos({ t: 'oi' }); } return; }
       this.relHost += dt; this.acSnap += dt;
       if (this.acSnap < 1 / SNAP_HZ) return;
       this.acSnap = 0;
@@ -193,7 +221,7 @@ export class Rede {
   snapshot() {
     const g = this.g, c = g.core, e = g.energia;
     return {
-      t: 's', ht: r2(this.relHost * 1000) / 1000, mt: r2(g.matchTime),
+      t: 's', ht: r2(this.relHost * 1000) / 1000, mt: r2(g.matchTime), cd: g.state === 'countdown' ? r2(g.countdown) : 0,
       f: g.fighters.map(f => [r2(f.pos.x), r2(f.pos.z), r2(f.vel.x), r2(f.vel.z), r2(f.facing), r2(f.stun), FASES.indexOf(f.attackPhase), r2(f.attackT), r2(f.shield), r2(f.score), r2(f.cooldown)]),
       c: [c.state === 'carried' ? 1 : c.state === 'flying' ? 2 : 0, r2(c.pos.x), r2(c.pos.y), r2(c.pos.z), c.carrier ? c.carrier.index : -1],
       e: [e.mult, r2(e.superT), e.final ? 1 : 0],
@@ -214,7 +242,7 @@ export class Rede {
     peer.on('open', () => {
       const c = this.hostConn = peer.connect(PREFIXO + this.convite, { reliable: true });
       const t = setTimeout(() => { if (!c.open) this.falha({ type: 'timeout' }); }, 15000);
-      c.on('open', () => { clearTimeout(t); this.visto = performance.now(); this.g.online = true; this.estado('convidado'); this.mudouPerfil(); });
+      c.on('open', () => { clearTimeout(t); this.fundo(); this.visto = performance.now(); this.g.online = true; this.estado('convidado'); this.mudouPerfil(); });
       c.on('data', d => this.doAnfitriao(d));
       c.on('close', () => this.perdeu('O anfitrião fechou a sala.'));
     });
@@ -231,6 +259,9 @@ export class Rede {
     if (d.t === 'lobby') this.mostrarLista(d.lista.map(v => v && { nome: limpaNome(v.nome), char: v.char }), this.eu ?? -1);
     else if (d.t === 'cheia') this.perdeu('A sala está cheia (4 jogadores).');
     else if (d.t === 'start') {
+      try { this.hostConn.send({ t: 'ok', m: d.m }); } catch (e) {}
+      if (d.m && d.m === this.partidaVista) return; // aviso repetido
+      this.partidaVista = d.m;
       const slots = d.slots.map((s, i) => ({ nome: limpaNome(s.nome) || ROSTER[i].name, char: CHARACTERS.some(c => c.id === s.char) ? s.char : CHARACTERS[0].id, humano: !!s.humano }));
       this.eu = d.eu;
       g.aplicarSala(slots, d.eu);
@@ -241,6 +272,7 @@ export class Rede {
       g.startMatch();
     } else if (d.t === 's') {
       if (!this.snaps) return;
+      if (g.state === 'countdown') g.countdown = d.cd > 0 ? d.cd : 0.0001; // contagem igual à do anfitrião
       d.recebido = performance.now() / 1000;
       const o = d.ht - d.recebido;
       this.off = this.off == null || o > this.off ? o : this.off;
@@ -293,6 +325,7 @@ export class Rede {
       c.pos.set(a.c[1] + (b.c[1] - a.c[1]) * k, a.c[2] + (b.c[2] - a.c[2]) * k, a.c[3] + (b.c[3] - a.c[3]) * k);
       if (antes === 'flying' && c.state === 'free' && c.onLand) c.onLand(c.pos);
     }
+    for (const f of g.fighters) f.update(dt, g); // só a parte visual (cones, brilho do acerto, escudo)
     const e = g.energia;
     e.mult = b.e[0]; e.superT = b.e[1]; e.final = !!b.e[2];
     g.rawDt = 0; e.relogio();
@@ -340,7 +373,7 @@ export class Rede {
   encerrar() {
     const g = this.g;
     try { if (this.peer) this.peer.destroy(); } catch (e) {}
-    this.peer = null; this.hostConn = null; this.vagas = []; this.host = false; this.snaps = null; this.eu = null;
+    this.peer = null; this.hostConn = null; this.vagas = []; this.host = false; this.snaps = null; this.eu = null; this.partidaVista = null;
     if (g.online) g.sairDaSala();
   }
   sair() {
