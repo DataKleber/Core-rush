@@ -1,0 +1,270 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style><title>Core Rush</title><meta name="description" content="Jogo de arena 3D no navegador: quatro competidores disputam um núcleo de energia. Grátis, sem cadastro, no PC e no celular."><meta property="og:type" content="website"><meta property="og:title" content="Core Rush — jogue no navegador"><meta property="og:description" content="Quatro competidores, um núcleo de energia. Grátis, sem cadastro, no PC e no celular."><meta property="og:url" content="https://datakleber.github.io/Core-rush/"><meta property="og:image" content="https://datakleber.github.io/Core-rush/assets/capa-link.jpg"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta name="twitter:card" content="summary_large_image"></head><body>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;800;900&family=Chakra+Petch:wght@500;600;700&display=swap">
+<style>
+/* Layout: tela cheia 3D; HUD flutuante nas bordas; telas de menu à esquerda sobre a arena viva */
+:root {
+  --void: #070916;
+  --panel: rgba(10, 13, 34, 0.78);
+  --ink: #eaf2ff;
+  --mute: #8f9cc4;
+  --light: #8ff3ff;
+  --chaos: #ff3d8b;
+  --gold: #ffc83a;
+  --display: "Unbounded", "Arial Black", system-ui, sans-serif;
+  --ui: "Chakra Petch", "Segoe UI", system-ui, sans-serif;
+  color-scheme: dark;
+}
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body { background: var(--void); color: var(--ink); font-family: var(--ui); overflow: hidden; user-select: none; -webkit-user-select: none; touch-action: none; }
+#app { position: fixed; inset: 0; }
+#game, #game canvas { position: absolute; inset: 0; display: block; }
+button { font-family: var(--ui); cursor: pointer; }
+button:focus-visible { outline: 2px solid var(--light); outline-offset: 3px; }
+
+/* ---------- carregamento ---------- */
+#loading { position: absolute; inset: 0; display: grid; place-content: center; gap: 18px; text-align: center; background: var(--void); z-index: 50; padding-inline: max(16px, env(safe-area-inset-left, 0px)) max(16px, env(safe-area-inset-right, 0px)); }
+#loading .t { font-family: var(--display); font-weight: 800; letter-spacing: 0.08em; font-size: 15px; color: var(--light); }
+.bar { width: min(280px, 70vw); height: 4px; background: rgba(143, 243, 255, 0.15); border-radius: 2px; overflow: hidden; margin-inline: auto; }
+#loadBar { height: 100%; background: linear-gradient(90deg, var(--chaos), var(--light)); transform-origin: left; transform: scaleX(0); transition: transform .2s; }
+#loadMsg { color: var(--mute); font-size: 13px; max-width: 40ch; }
+
+/* ---------- telas ---------- */
+.screen { position: absolute; inset: 0; z-index: 20; display: flex; align-items: center; overflow-y: auto;
+  padding-block: max(24px, env(safe-area-inset-top, 0px)) max(24px, env(safe-area-inset-bottom, 0px));
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  background: linear-gradient(90deg, rgba(7, 9, 22, 0.94) 0%, rgba(7, 9, 22, 0.7) 42%, rgba(7, 9, 22, 0) 75%); }
+.card { width: min(520px, 100%); margin-block: auto; display: flex; flex-direction: column; gap: 22px; margin-left: clamp(0px, 6vw, 90px); }
+.title { font-family: var(--display); line-height: 0.86; margin: 0; text-wrap: balance; }
+.title .chaos { display: block; font-weight: 900; font-size: clamp(54px, 11vw, 112px); color: var(--chaos); letter-spacing: -0.02em; transform: skewX(-8deg); text-shadow: 3px 0 0 rgba(143, 243, 255, 0.35), -3px 0 0 rgba(255, 200, 58, 0.25); }
+.title .and { display: block; font-family: var(--ui); font-weight: 600; font-size: clamp(14px, 2vw, 18px); letter-spacing: 0.5em; color: var(--mute); margin: 10px 0 6px 6px; }
+.title .light { display: block; font-weight: 800; font-size: clamp(54px, 11vw, 112px); color: #f4feff; letter-spacing: 0.04em; text-shadow: 0 0 18px rgba(143, 243, 255, 0.9), 0 0 48px rgba(143, 243, 255, 0.55); }
+.tag { font-size: 18px; line-height: 1.45; color: var(--ink); max-width: 36ch; margin: 0; }
+.rules { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.rules li { display: grid; grid-template-columns: 74px 1fr; gap: 12px; align-items: baseline; font-size: 15px; color: var(--mute); }
+.rules b { font-weight: 700; color: var(--light); font-size: 12px; letter-spacing: 0.14em; }
+.actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.btn-main { font-family: var(--display); font-weight: 800; font-size: 20px; letter-spacing: 0.08em; color: #071018; background: var(--light); border: 0; border-radius: 6px; padding: 16px 34px; box-shadow: 0 0 0 1px rgba(255,255,255,.4) inset, 0 0 28px rgba(143, 243, 255, 0.55); transition: transform .12s, box-shadow .12s; }
+.btn-main:hover { transform: translateY(-2px); box-shadow: 0 0 0 1px rgba(255,255,255,.6) inset, 0 0 40px rgba(143, 243, 255, 0.8); }
+.btn-ghost { font-size: 14px; font-weight: 600; letter-spacing: 0.06em; color: var(--ink); background: transparent; border: 1px solid rgba(143, 243, 255, 0.35); border-radius: 6px; padding: 12px 18px; }
+.btn-ghost:hover { border-color: var(--light); }
+.keys { font-size: 13px; color: var(--mute); line-height: 1.7; }
+kbd { font-family: var(--ui); font-size: 12px; font-weight: 700; color: var(--ink); border: 1px solid rgba(143, 243, 255, 0.3); border-bottom-width: 2px; border-radius: 4px; padding: 1px 6px; }
+.touch .keys .kb { display: none; }
+.keys .tc { display: none; }
+.touch .keys .tc { display: inline; }
+
+#results .card, #pause .card { gap: 18px; }
+#resTitle { font-family: var(--display); font-weight: 900; font-size: clamp(34px, 7vw, 64px); margin: 0; line-height: 1; color: var(--light); text-wrap: balance; }
+#resSub { margin: 0; color: var(--mute); font-size: 16px; max-width: 40ch; }
+#resList { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+#resList li { display: grid; grid-template-columns: 36px 12px 1fr auto; gap: 12px; align-items: center; padding: 12px 16px; background: var(--panel); border-left: 3px solid var(--c); border-radius: 4px; font-size: 18px; font-weight: 700; }
+#resList li.me { background: rgba(255, 200, 58, 0.12); }
+#resList .pos { color: var(--mute); font-variant-numeric: tabular-nums; }
+#resList .dot, #board .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--c); box-shadow: 0 0 10px var(--c); }
+#resList .pts { font-variant-numeric: tabular-nums; color: var(--ink); }
+.pause-t { font-family: var(--display); font-weight: 800; font-size: 44px; margin: 0; }
+/* v1.0.1: medidor de FPS (?fps) */
+#fpsMeter { position: fixed; left: 50%; bottom: max(6px, env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 60; pointer-events: none; font: 600 11px/1.3 var(--ui); color: #b8ffcf; background: rgba(0, 0, 0, 0.6); padding: 3px 8px; border-radius: 4px; white-space: nowrap; max-width: calc(100vw - 16px); overflow: hidden; text-overflow: ellipsis; }
+/* v0.9: seleção de personagens */
+.card.wide { width: min(760px, 100%); }
+/* v1.3: sala online */
+.btn-main.amigos { background: #ffc23a; box-shadow: 0 0 0 1px rgba(255,255,255,.4) inset, 0 0 28px rgba(255, 194, 58, 0.5); }
+#sala .card { gap: 14px; }
+.sala-msg { margin: -6px 0 0; color: var(--ink); opacity: .85; font-size: 15px; line-height: 1.4; }
+.sala-nome { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 14px; letter-spacing: .06em; }
+.sala-nome input { flex: 1; max-width: 220px; font: 700 16px var(--display); letter-spacing: .08em; text-transform: uppercase; color: var(--ink); background: var(--panel); border: 1px solid rgba(143,243,255,.35); border-radius: 6px; padding: 10px 12px; }
+.char-grid.mini .pick { padding: 4px 4px 6px; font-size: 11px; }
+.char-grid.mini .pick img { max-width: 64px; }
+.sala-link code { display: block; font-size: 14px; padding: 10px 12px; background: var(--panel); border: 1px dashed rgba(255,194,58,.6); border-radius: 6px; color: #ffc23a; word-break: break-all; user-select: all; }
+.sala-link .actions { margin-top: 8px; }
+.sala-lista { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.sala-lista li { display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: var(--panel); border-left: 4px solid var(--c); border-radius: 6px; font-weight: 700; font-size: 14px; }
+.sala-lista li small { opacity: .6; font-weight: 600; margin-left: auto; }
+.sala-lista li.bot { opacity: .55; }
+.sel-t { font-size: clamp(22px, 4vw, 32px); }
+.char-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+.pick { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 6px 10px; background: var(--panel); border: 2px solid rgba(143, 243, 255, 0.18); border-radius: 8px; color: var(--ink); font-weight: 700; font-size: 13px; line-height: 1.2; text-align: center; min-width: 0; }
+.pick img { width: 100%; max-width: 120px; height: auto; aspect-ratio: 5 / 6; }
+.pick:hover { border-color: rgba(143, 243, 255, 0.5); }
+.pick.on { border-color: var(--gold); background: rgba(255, 200, 58, 0.12); box-shadow: 0 0 18px rgba(255, 200, 58, 0.25); }
+.sel-note { margin: 0; color: var(--mute); font-size: 15px; }
+.sel-note b { color: var(--gold); }
+@media (max-width: 640px) { .char-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+
+/* ---------- HUD ---------- */
+#hud { position: absolute; inset: 0; z-index: 10; pointer-events: none; }
+#topbar { position: absolute; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
+  padding-top: max(14px, env(safe-area-inset-top, 0px)); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(72px, calc(env(safe-area-inset-right, 0px) + 64px)); }
+#board { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+#board .row { order: 0; display: grid; grid-template-columns: 10px minmax(0, 1fr) 40px; gap: 10px; align-items: center; width: 190px; padding: 6px 12px; background: var(--panel); border-radius: 4px; font-weight: 700; font-size: 15px; border-left: 3px solid transparent; transition: background .2s; }
+#board .row.me .nm { color: var(--gold); }
+#board .row.carrier { border-left-color: var(--c); background: color-mix(in srgb, var(--c) 22%, rgba(10, 13, 34, 0.85)); }
+#board .row.carrier .nm::after { content: " ◆"; color: var(--light); }
+#board .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#board .pts { text-align: right; font-variant-numeric: tabular-nums; font-size: 17px; }
+#timerBox { position: absolute; left: 50%; top: max(12px, env(safe-area-inset-top, 0px)); transform: translateX(-50%); text-align: center; }
+#timer { font-family: var(--display); font-weight: 800; font-size: 38px; font-variant-numeric: tabular-nums; letter-spacing: 0.02em; text-shadow: 0 2px 12px rgba(0, 0, 0, 0.6); }
+#timerBox.hot #timer { color: var(--chaos); animation: throb 1s infinite; }
+@keyframes throb { 50% { transform: scale(1.12); } }
+#coreState { font-size: 12px; font-weight: 700; letter-spacing: 0.16em; color: var(--light); margin-top: 2px; text-shadow: 0 1px 6px rgba(0,0,0,.8); white-space: nowrap; }
+#pauseBtn { pointer-events: auto; position: absolute; top: max(14px, env(safe-area-inset-top, 0px)); right: max(16px, env(safe-area-inset-right, 0px)); width: 44px; height: 44px; border-radius: 6px; border: 1px solid rgba(143, 243, 255, 0.3); background: var(--panel); color: var(--ink); font-weight: 700; font-size: 14px; letter-spacing: 2px; }
+#banner { position: absolute; left: 50%; top: 30%; transform: translate(-50%, -50%) scale(.8); font-family: var(--display); font-weight: 800; font-size: clamp(20px, 4.2vw, 40px); white-space: nowrap; opacity: 0; text-shadow: 0 2px 0 rgba(0,0,0,.5), 0 0 24px currentColor; }
+#banner.on { animation: bannerIn 1.2s ease-out forwards; }
+@keyframes bannerIn { 0% { opacity: 0; transform: translate(-50%, -50%) scale(1.4); } 12% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 75% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -60%) scale(1); } }
+#countdown { position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%); font-family: var(--display); font-weight: 900; font-size: clamp(64px, 14vw, 150px); color: #f4feff; opacity: 0; text-shadow: 0 0 30px rgba(143, 243, 255, 0.9); white-space: nowrap; }
+#countdown.pop { animation: pop .9s ease-out forwards; }
+@keyframes pop { 0% { opacity: 0; transform: translate(-50%, -50%) scale(2); } 20% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 80% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -50%) scale(.9); } }
+#coreArrow { position: absolute; left: 0; top: 0; width: 0; height: 0; --c: #8ff3ff; }
+#coreArrow::before { content: ""; position: absolute; left: -16px; top: -14px; border-left: 30px solid var(--c); border-top: 14px solid transparent; border-bottom: 14px solid transparent; filter: drop-shadow(0 0 8px var(--c)); }
+#coreArrow::after { content: ""; position: absolute; left: -34px; top: -9px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 0 14px 4px var(--c); }
+.float { position: absolute; transform: translate(-50%, -50%); font-family: var(--display); font-weight: 800; font-size: 20px; text-shadow: 0 2px 6px rgba(0, 0, 0, 0.7); animation: rise .9s ease-out forwards; }
+@keyframes rise { to { transform: translate(-50%, -160%); opacity: 0; } }
+
+/* ---------- toque ---------- */
+#joyZone, #atkBtn { display: none; }
+.touch.playing #joyZone { display: block; position: absolute; left: 0; bottom: 0; width: 55%; height: 70%; z-index: 12; }
+#joyBase { position: absolute; width: 120px; height: 120px; margin: -60px 0 0 -60px; border-radius: 50%; border: 2px solid rgba(143, 243, 255, 0.35); background: rgba(10, 13, 34, 0.35); opacity: 0; transition: opacity .15s; }
+#joyBase.on { opacity: 1; }
+#joyKnob { position: absolute; left: 50%; top: 50%; width: 54px; height: 54px; border-radius: 50%; background: rgba(143, 243, 255, 0.8); transform: translate(-50%, -50%); box-shadow: 0 0 16px rgba(143, 243, 255, 0.6); }
+.touch.playing #atkBtn { display: grid; place-items: center; position: absolute; z-index: 12; right: max(28px, calc(env(safe-area-inset-right, 0px) + 20px)); bottom: max(34px, calc(env(safe-area-inset-bottom, 0px) + 24px)); width: 96px; height: 96px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.5); background: radial-gradient(circle at 40% 35%, #ff7fb0, var(--chaos)); color: #fff; font-weight: 700; font-size: 13px; letter-spacing: 0.1em; box-shadow: 0 0 24px rgba(255, 61, 139, 0.6); }
+#atkBtn.press { transform: scale(0.92); }
+
+@media (max-width: 640px) {
+  .screen { align-items: flex-end; background: linear-gradient(0deg, rgba(7, 9, 22, 0.96) 0%, rgba(7, 9, 22, 0.75) 60%, rgba(7, 9, 22, 0.2) 100%); }
+  .card { margin-left: 0; gap: 16px; }
+  .tag { font-size: 16px; }
+  #board .row { width: 132px; font-size: 12px; padding: 4px 8px; grid-template-columns: 8px minmax(0,1fr) 28px; gap: 6px; }
+  #board .pts { font-size: 14px; }
+  #timerBox { left: auto; right: max(68px, calc(env(safe-area-inset-right, 0px) + 64px)); transform: none; text-align: right; }
+  #timer { font-size: 28px; }
+  #coreState { font-size: 10px; letter-spacing: 0.1em; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #timerBox.hot #timer { animation: none; }
+}
+</style>
+
+<div id="app">
+  <div id="game"></div>
+
+  <div id="hud" hidden>
+    <div id="topbar">
+      <div id="board"></div>
+    </div>
+    <div id="timerBox"><div id="timer">2:00</div><div id="coreState">NÚCLEO LIVRE</div></div>
+    <button id="pauseBtn" aria-label="Pausar">II</button>
+    <div id="banner"></div>
+    <div id="countdown"></div>
+    <div id="coreArrow" hidden></div>
+    <div id="floats"></div>
+  </div>
+
+  <div id="joyZone"><div id="joyBase"><div id="joyKnob"></div></div></div>
+  <button id="atkBtn" aria-label="Atacar">ATACAR</button>
+
+  <section id="menu" class="screen" hidden>
+    <div class="card">
+      <h1 class="title"><span class="chaos">CORE</span><span class="light">RUSH</span></h1>
+      <p class="tag" style="margin-top:-10px;font-weight:700;letter-spacing:.18em;color:#ffc23a;font-size:13px">v1.3 · JOGUE COM AMIGOS</p>
+      <p class="tag">Quatro competidores, um núcleo de energia. Pegue a luz e segure o máximo que conseguir.</p>
+      <ul class="rules">
+        <li><b>CAPTURE</b><span>Encoste no núcleo para pegá-lo. Cada segundo com ele vale 1 ponto.</span></li>
+        <li><b>FUJA</b><span>Com o núcleo você fica mais lento e vira o alvo de todos.</span></li>
+        <li><b>DERRUBE</b><span>Acerte o portador com o disparo curto para soltar o núcleo.</span></li>
+      </ul>
+      <div class="actions">
+        <button class="btn-main" id="playBtn">JOGAR</button>
+        <button class="btn-main amigos" id="amigosBtn">JOGAR COM AMIGOS</button>
+        <button class="btn-ghost" id="musicBtn" aria-pressed="true">Música: ligada</button>
+      </div>
+      <div class="keys">
+        <span class="kb"><kbd>W A S D</kbd> ou setas para mover · <kbd>Espaço</kbd> <kbd>J</kbd> ou clique para atacar · <kbd>Esc</kbd> pausa</span>
+        <span class="tc">Arraste no lado esquerdo para mover · botão rosa para atacar</span>
+      </div>
+    </div>
+  </section>
+
+  <section id="select" class="screen" hidden>
+    <div class="card wide">
+      <p class="pause-t sel-t">ESCOLHA SEU PERSONAGEM</p>
+      <div id="charGrid" class="char-grid"></div>
+      <p class="sel-note"><b id="charName">Abelha Guerreira</b> · todos têm as mesmas capacidades; muda só o visual.</p>
+      <div class="actions">
+        <button class="btn-main" id="startBtn">JOGAR</button>
+        <button class="btn-ghost" id="backBtn">Voltar</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="sala" class="screen" hidden>
+    <div class="card wide">
+      <p class="pause-t sel-t" id="salaTit">JOGAR COM AMIGOS</p>
+      <p class="sala-msg" id="salaMsg">Crie uma sala e mande o link. Até 4 pessoas; vagas vazias ficam com bots.</p>
+      <label class="sala-nome">Seu nome <input id="salaNome" maxlength="10" autocomplete="off" spellcheck="false" placeholder="ex.: KLEBER"></label>
+      <div id="salaChars" class="char-grid mini"></div>
+      <div id="salaLink" class="sala-link" hidden>
+        <code id="salaUrl"></code>
+        <div class="actions"><button class="btn-ghost" id="salaCopiar">Copiar link</button><button class="btn-ghost" id="salaZap">Enviar no WhatsApp</button></div>
+      </div>
+      <ol id="salaLista" class="sala-lista" hidden></ol>
+      <div class="actions">
+        <button class="btn-main" id="salaAcao">CRIAR SALA</button>
+        <button class="btn-ghost" id="salaSair">Voltar</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="pause" class="screen" hidden>
+    <div class="card">
+      <p class="pause-t">PAUSADO</p>
+      <div class="actions">
+        <button class="btn-main" id="resumeBtn">CONTINUAR</button>
+        <button class="btn-ghost" id="quitBtn">Sair para o menu</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="results" class="screen" hidden>
+    <div class="card">
+      <h2 id="resTitle">VOCÊ VENCEU!</h2>
+      <p id="resSub"></p>
+      <ol id="resList"></ol>
+      <div class="actions">
+        <button class="btn-main" id="againBtn">JOGAR DE NOVO</button>
+        <button class="btn-ghost" id="menuBtn">Menu</button>
+      </div>
+    </div>
+  </section>
+
+  <div id="loading">
+    <div class="t">CORE RUSH</div>
+    <div class="bar"><div id="loadBar"></div></div>
+    <div id="loadMsg">Carregando arena…</div>
+  </div>
+</div>
+
+<audio id="music" src="assets/musica_menu.mp3" loop preload="auto"></audio>
+<audio id="musicGame" src="assets/musica_partida.mp3" loop preload="auto"></audio>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script>
+  // marca a tela de jogo para mostrar os controles de toque só durante a partida
+  new MutationObserver(() => {
+    const hud = document.getElementById('hud');
+    document.body.classList.toggle('playing', hud && !hud.hidden);
+  }).observe(document.getElementById('hud'), { attributes: true, attributeFilter: ['hidden'] });
+</script>
+<script src="js/vendor/peerjs.min.js"></script>
+<script type="module" src="js/main.js"></script>
+<script type="module" src="js/publico.js"></script>
+
+</body></html>
