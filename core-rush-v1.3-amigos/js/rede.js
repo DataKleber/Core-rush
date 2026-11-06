@@ -200,6 +200,8 @@ export class Rede {
       }
       if (g.state !== 'play' && g.state !== 'countdown') { if (agora - (this.ping || 0) > 1000) { this.ping = agora; this.enviarTodos({ t: 'oi' }); } return; }
       this.relHost += dt; this.acSnap += dt;
+      this.qn = (this.qn || 0) + 1; this.qt = (this.qt || 0) + dt;
+      if (this.qt >= 1) { this.hf = Math.round(this.qn / this.qt); this.qn = 0; this.qt = 0; }
       if (this.acSnap < 1 / SNAP_HZ) return;
       this.acSnap = 0;
       this.enviarTodos(this.snapshot());
@@ -221,7 +223,7 @@ export class Rede {
   snapshot() {
     const g = this.g, c = g.core, e = g.energia;
     return {
-      t: 's', ht: r2(this.relHost * 1000) / 1000, mt: r2(g.matchTime), cd: g.state === 'countdown' ? r2(g.countdown) : 0,
+      t: 's', ht: r2(this.relHost * 1000) / 1000, mt: r2(g.matchTime), cd: g.state === 'countdown' ? r2(g.countdown) : 0, hf: this.hf || 0,
       f: g.fighters.map(f => [r2(f.pos.x), r2(f.pos.z), r2(f.vel.x), r2(f.vel.z), r2(f.facing), r2(f.stun), FASES.indexOf(f.attackPhase), r2(f.attackT), r2(f.shield), r2(f.score), r2(f.cooldown)]),
       c: [c.state === 'carried' ? 1 : c.state === 'flying' ? 2 : 0, r2(c.pos.x), r2(c.pos.y), r2(c.pos.z), c.carrier ? c.carrier.index : -1],
       e: [e.mult, r2(e.superT), e.final ? 1 : 0],
@@ -265,7 +267,7 @@ export class Rede {
       const slots = d.slots.map((s, i) => ({ nome: limpaNome(s.nome) || ROSTER[i].name, char: CHARACTERS.some(c => c.id === s.char) ? s.char : CHARACTERS[0].id, humano: !!s.humano }));
       this.eu = d.eu;
       g.aplicarSala(slots, d.eu);
-      this.snaps = []; this.off = null; this.k = 0; this.ultimo = null;
+      this.snaps = []; this.off = null; this.k = 0; this.ultimo = null; this.vistos = 0; this.gaps = []; this.ultRec = 0; this.atraso = null;
       g.remote = true;
       $('sala').hidden = true;
       $('againBtn').disabled = true; $('againBtn').textContent = 'AGUARDANDO ANFITRIÃO';
@@ -274,6 +276,8 @@ export class Rede {
       if (!this.snaps) return;
       if (g.state === 'countdown') g.countdown = d.cd > 0 ? d.cd : 0.0001; // contagem igual à do anfitrião
       d.recebido = performance.now() / 1000;
+      if (this.ultRec) { const gap = d.recebido - this.ultRec; this.gaps = (this.gaps || []).concat([[d.recebido, gap]]).filter(x => x[0] > d.recebido - 3); }
+      this.ultRec = d.recebido; this.hf = d.hf;
       const o = d.ht - d.recebido;
       this.off = this.off == null || o > this.off ? o : this.off;
       this.snaps.push(d); if (this.snaps.length > 40) this.snaps.shift();
@@ -293,7 +297,12 @@ export class Rede {
     if (!S || !S.length) return;
     const agora = performance.now() / 1000;
     this.off -= dt * 0.02; // acompanha variações lentas de atraso
-    const rt = tudo ? Infinity : agora + this.off - ATRASO;
+    // v1.3.2: atraso adaptativo — se os envios chegam aos trancos, desenha um pouco mais atrás (sem congelar)
+    const maior = this.gaps && this.gaps.length ? Math.max(...this.gaps.map(x => x[1])) : 0.05;
+    const alvo = Math.min(0.25, Math.max(ATRASO, maior + 0.04));
+    this.atraso = this.atraso == null ? ATRASO : this.atraso + Math.max(-dt * 0.15, Math.min(dt * 0.6, alvo - this.atraso));
+    let rt = tudo ? Infinity : agora + this.off - this.atraso;
+    this.diag(dt, maior);
     // eventos (ataques, acertos, capturas, orbes) disparam quando o "tempo de desenho" passa por eles
     for (const s of S) if (!s.feito && s.ht <= rt) { s.feito = true; for (const [t, d] of s.ev) this.evento(t, d); }
     let a = S[0], b = S[0];
@@ -302,9 +311,17 @@ export class Rede {
     while (S.length > 3 && S[1].ht < rt - 0.5) S.shift();
 
     const c = g.core, ci = b.c[4];
+    this.vistos = (this.vistos || 0) + 1;
     g.fighters.forEach((f, i) => {
       const A = a.f[i], B = b.f[i];
-      f.pos.x = A[0] + (B[0] - A[0]) * k; f.pos.z = A[1] + (B[1] - A[1]) * k;
+      // posição-alvo: suavizada entre dois envios; se faltar envio novo, segue a velocidade por até 0,25 s
+      let tx = A[0] + (B[0] - A[0]) * k, tz = A[1] + (B[1] - A[1]) * k;
+      const extra = rt !== Infinity && rt > b.ht ? Math.min(0.25, rt - b.ht) : 0;
+      if (extra > 0 && B[5] <= 0) { tx += B[2] * extra; tz += B[3] * extra; }
+      // correção suave: pequenas diferenças são absorvidas em ~0,1 s, só salta se a diferença for grande
+      const ex = tx - f.pos.x, ez = tz - f.pos.z, err = Math.hypot(ex, ez);
+      if (err > 3 || dt === 0 || !this.vistos) { f.pos.x = tx; f.pos.z = tz; }
+      else { const kk = 1 - Math.exp(-18 * dt); f.pos.x += ex * kk; f.pos.z += ez * kk; }
       f.vel.set(B[2], 0, B[3]);
       f.facing = lerpAng(A[4], B[4], k);
       f.stun = B[5]; f.attackPhase = FASES[B[6]] || 'none'; f.attackT = B[7]; f.shield = B[8]; f.cooldown = B[10];
@@ -334,6 +351,15 @@ export class Rede {
     const sec = Math.ceil(g.matchTime);
     if (sec !== g.lastSecond) { g.lastSecond = sec; if (sec <= 10 && sec > 0) g.audio.tick(); }
     if (!g.finalBuildOn && g.matchTime <= 12.3) { g.finalBuildOn = true; g.audio.finalBuild(); }
+  }
+
+  // medidor opcional (?rede no endereço): envios por segundo, maior intervalo, atraso usado e quadros do anfitrião
+  diag(dt, maior) {
+    if (!/[?&]rede\b/.test(location.search)) return;
+    if (!this.el) { this.el = document.createElement('div'); this.el.style.cssText = 'position:fixed;left:8px;bottom:8px;z-index:99;font:600 12px monospace;color:#8ff3ff;background:rgba(0,0,0,.6);padding:4px 8px;border-radius:4px;pointer-events:none'; document.body.appendChild(this.el); }
+    this.dt0 = (this.dt0 || 0) + dt; if (this.dt0 < 0.5) return; this.dt0 = 0;
+    const n = this.gaps ? this.gaps.length / 3 : 0;
+    this.el.textContent = `rede: ${n.toFixed(0)} envios/s · maior intervalo ${(maior * 1000).toFixed(0)} ms · atraso ${(this.atraso * 1000).toFixed(0)} ms · anfitrião ${this.hf || '?'} quadros/s`;
   }
 
   evento(t, d) {
