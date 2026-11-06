@@ -71,20 +71,6 @@ kbd { font-family: var(--ui); font-size: 12px; font-weight: 700; color: var(--in
 #fpsMeter { position: fixed; left: 50%; bottom: max(6px, env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 60; pointer-events: none; font: 600 11px/1.3 var(--ui); color: #b8ffcf; background: rgba(0, 0, 0, 0.6); padding: 3px 8px; border-radius: 4px; white-space: nowrap; max-width: calc(100vw - 16px); overflow: hidden; text-overflow: ellipsis; }
 /* v0.9: seleção de personagens */
 .card.wide { width: min(760px, 100%); }
-/* v1.3: sala online */
-.btn-main.amigos { background: #ffc23a; box-shadow: 0 0 0 1px rgba(255,255,255,.4) inset, 0 0 28px rgba(255, 194, 58, 0.5); }
-#sala .card { gap: 14px; }
-.sala-msg { margin: -6px 0 0; color: var(--ink); opacity: .85; font-size: 15px; line-height: 1.4; }
-.sala-nome { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 14px; letter-spacing: .06em; }
-.sala-nome input { flex: 1; max-width: 220px; font: 700 16px var(--display); letter-spacing: .08em; text-transform: uppercase; color: var(--ink); background: var(--panel); border: 1px solid rgba(143,243,255,.35); border-radius: 6px; padding: 10px 12px; }
-.char-grid.mini .pick { padding: 4px 4px 6px; font-size: 11px; }
-.char-grid.mini .pick img { max-width: 64px; }
-.sala-link code { display: block; font-size: 14px; padding: 10px 12px; background: var(--panel); border: 1px dashed rgba(255,194,58,.6); border-radius: 6px; color: #ffc23a; word-break: break-all; user-select: all; }
-.sala-link .actions { margin-top: 8px; }
-.sala-lista { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
-.sala-lista li { display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: var(--panel); border-left: 4px solid var(--c); border-radius: 6px; font-weight: 700; font-size: 14px; }
-.sala-lista li small { opacity: .6; font-weight: 600; margin-left: auto; }
-.sala-lista li.bot { opacity: .55; }
 .sel-t { font-size: clamp(22px, 4vw, 32px); }
 .char-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
 .pick { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 6px 10px; background: var(--panel); border: 2px solid rgba(143, 243, 255, 0.18); border-radius: 8px; color: var(--ink); font-weight: 700; font-size: 13px; line-height: 1.2; text-align: center; min-width: 0; }
@@ -169,7 +155,6 @@ kbd { font-family: var(--ui); font-size: 12px; font-weight: 700; color: var(--in
   <section id="menu" class="screen" hidden>
     <div class="card">
       <h1 class="title"><span class="chaos">CORE</span><span class="light">RUSH</span></h1>
-      <p class="tag" style="margin-top:-10px;font-weight:700;letter-spacing:.18em;color:#ffc23a;font-size:13px">v1.3 · JOGUE COM AMIGOS</p>
       <p class="tag">Quatro competidores, um núcleo de energia. Pegue a luz e segure o máximo que conseguir.</p>
       <ul class="rules">
         <li><b>CAPTURE</b><span>Encoste no núcleo para pegá-lo. Cada segundo com ele vale 1 ponto.</span></li>
@@ -178,7 +163,6 @@ kbd { font-family: var(--ui); font-size: 12px; font-weight: 700; color: var(--in
       </ul>
       <div class="actions">
         <button class="btn-main" id="playBtn">JOGAR</button>
-        <button class="btn-main amigos" id="amigosBtn">JOGAR COM AMIGOS</button>
         <button class="btn-ghost" id="musicBtn" aria-pressed="true">Música: ligada</button>
       </div>
       <div class="keys">
@@ -196,24 +180,6 @@ kbd { font-family: var(--ui); font-size: 12px; font-weight: 700; color: var(--in
       <div class="actions">
         <button class="btn-main" id="startBtn">JOGAR</button>
         <button class="btn-ghost" id="backBtn">Voltar</button>
-      </div>
-    </div>
-  </section>
-
-  <section id="sala" class="screen" hidden>
-    <div class="card wide">
-      <p class="pause-t sel-t" id="salaTit">JOGAR COM AMIGOS</p>
-      <p class="sala-msg" id="salaMsg">Crie uma sala e mande o link. Até 4 pessoas; vagas vazias ficam com bots.</p>
-      <label class="sala-nome">Seu nome <input id="salaNome" maxlength="10" autocomplete="off" spellcheck="false" placeholder="ex.: KLEBER"></label>
-      <div id="salaChars" class="char-grid mini"></div>
-      <div id="salaLink" class="sala-link" hidden>
-        <code id="salaUrl"></code>
-        <div class="actions"><button class="btn-ghost" id="salaCopiar">Copiar link</button><button class="btn-ghost" id="salaZap">Enviar no WhatsApp</button></div>
-      </div>
-      <ol id="salaLista" class="sala-lista" hidden></ol>
-      <div class="actions">
-        <button class="btn-main" id="salaAcao">CRIAR SALA</button>
-        <button class="btn-ghost" id="salaSair">Voltar</button>
       </div>
     </div>
   </section>
@@ -263,7 +229,6 @@ kbd { font-family: var(--ui); font-size: 12px; font-weight: 700; color: var(--in
     document.body.classList.toggle('playing', hud && !hud.hidden);
   }).observe(document.getElementById('hud'), { attributes: true, attributeFilter: ['hidden'] });
 </script>
-<script src="js/vendor/peerjs.min.js"></script>
 <script type="module" src="js/main.js"></script>
 <script type="module" src="js/publico.js"></script>
 
